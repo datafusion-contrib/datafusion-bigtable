@@ -1,9 +1,10 @@
 use std::any::Any;
 use std::sync::Arc;
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 
-use arrow::datatypes::SchemaRef;
+use arrow::datatypes::{SchemaRef, Schema, Field};
 use datafusion::datasource::TableProvider;
 use datafusion::datasource::datasource::TableProviderFilterPushDown;
 use datafusion::error::Result;
@@ -18,7 +19,14 @@ pub struct BigtableTable {
 }
 
 impl BigtableTable {
-    pub fn new(schema: SchemaRef) -> Self {
+    pub fn new(instance: &str, table: &str, column_family: &str, columns: Vec<Field>, only_read_latest: bool) -> Self {
+        let metadata = HashMap::from([
+            ("instance".to_string(), instance.to_string()),
+            ("table".to_string(), table.to_string()),
+            ("column_family".to_string(), column_family.to_string()),
+            ("only_read_latest".to_string(), only_read_latest.to_string()),
+        ]);
+        let schema = Arc::new(Schema::new_with_metadata(columns, metadata));
         Self { schema }
     }
 }
