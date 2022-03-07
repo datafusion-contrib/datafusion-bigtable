@@ -237,6 +237,12 @@ checksum = "a4a45a46ab1f2412e53d3a0ade76ffad2025804294569aae387231a0cd6e0899"
 
 [[package]]
 name = "byteorder"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fc10e8cc6b2580fda3f36eb6dc5316657f812a3df879a44a66fc9f0fdbc4855"
+
+[[package]]
+name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
@@ -406,6 +412,7 @@ dependencies = [
  "arrow",
  "async-trait",
  "bigtable_rs",
+ "byteorder 0.5.3",
  "datafusion",
  "tokio",
 ]
@@ -1293,7 +1300,7 @@ dependencies = [
  "arrow",
  "base64",
  "brotli",
- "byteorder",
+ "byteorder 1.4.3",
  "chrono",
  "flate2",
  "lz4",
@@ -1956,7 +1963,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c6d965454947cc7266d22716ebfd07b18d84ebaf35eec558586bbb2a8cb6b5b"
 dependencies = [
- "byteorder",
+ "byteorder 1.4.3",
  "integer-encoding",
  "log",
  "ordered-float 1.1.1",
