@@ -29,7 +29,7 @@ ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons whe
 ### SQL
 - ✅ select by `"_row_key" =`
 - ✅ select by `"_row_key" IN`
-- [ ] select by `"_row_key" BETWEEN`
+- ✅ select by `"_row_key" BETWEEN`
 - [ ] select by composite row keys (via `table_partition_cols` and `table_partition_separator`)
 - [ ] Projection pushdown
 - [ ] Predicate push down ([Value range](https://cloud.google.com/bigtable/docs/using-filters#value-range))

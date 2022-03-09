@@ -81,6 +81,40 @@ pub fn compose(
                 }
                 _ => (),
             },
+            Expr::Between {
+                expr,
+                negated,
+                low,
+                high,
+            } => match expr.as_ref() {
+                Expr::Column(col) => {
+                    if datasource.table_partition_cols.contains(&col.name) {
+                        if negated.to_owned() {
+                            return Err(DataFusionError::Execution(
+                                "_row_key filter: NOT IN is not supported".to_owned(),
+                            ));
+                        }
+                        match low.as_ref() {
+                            Expr::Literal(ScalarValue::Utf8(Some(low_key))) => {
+                                match high.as_ref() {
+                                    Expr::Literal(ScalarValue::Utf8(Some(high_key))) => row_ranges
+                                        .push(RowRange {
+                                            start_key: Some(StartKey::StartKeyClosed(
+                                                low_key.clone().into_bytes(),
+                                            )),
+                                            end_key: Some(EndKey::EndKeyClosed(
+                                                high_key.clone().into_bytes(),
+                                            )),
+                                        }),
+                                    _ => (),
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+                _ => (),
+            },
             _ => (),
         }
     }
