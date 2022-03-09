@@ -166,13 +166,15 @@ impl TableProvider for BigtableDataSource {
         // The datasource should return *at least* this number of rows if available.
         _limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let (row_ranges, row_filters) = composer::compose(self.clone(), projection, filters);
-        Ok(Arc::new(BigtableExec::new(
-            self.clone(),
-            projection,
-            row_ranges,
-            row_filters,
-        )))
+        match composer::compose(self.clone(), projection, filters) {
+            Ok((row_ranges, row_filters)) => Ok(Arc::new(BigtableExec::new(
+                self.clone(),
+                projection,
+                row_ranges,
+                row_filters,
+            ))),
+            Err(err) => Err(err),
+        }
     }
 
     /// Tests whether the table provider can make use of a filter expression
@@ -423,12 +425,23 @@ mod tests {
         let mut ctx = ExecutionContext::new();
         ctx.register_table("weather_balloons", Arc::new(bigtable_datasource))
             .unwrap();
-        let batches = ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons where \"_row_key\" = 'us-west2#3698#2021-03-05-1200'").await?.collect().await?;
-        let expected = vec![
+        let mut batches = ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons where \"_row_key\" = 'us-west2#3698#2021-03-05-1200'").await?.collect().await?;
+        let mut expected = vec![
             "+-------------------------------+----------+-------------------------+",
             "| _row_key                      | pressure | _timestamp              |",
             "+-------------------------------+----------+-------------------------+",
-            "| us-west2#3698#2021-03-05-1200 | 94558    | 2022-03-07 07:15:17.700 |",
+            "| us-west2#3698#2021-03-05-1200 | 94558    | 2021-03-05 12:00:05.100 |",
+            "+-------------------------------+----------+-------------------------+",
+        ];
+        assert_batches_eq!(expected, &batches);
+
+        batches = ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons where \"_row_key\" IN ('us-west2#3698#2021-03-05-1200', 'us-west2#3698#2021-03-05-1201') ORDER BY \"_row_key\"").await?.collect().await?;
+        expected = vec![
+            "+-------------------------------+----------+-------------------------+",
+            "| _row_key                      | pressure | _timestamp              |",
+            "+-------------------------------+----------+-------------------------+",
+            "| us-west2#3698#2021-03-05-1200 | 94558    | 2021-03-05 12:00:05.100 |",
+            "| us-west2#3698#2021-03-05-1201 | 94122    | 2021-03-05 12:01:05.200 |",
             "+-------------------------------+----------+-------------------------+",
         ];
         assert_batches_eq!(expected, &batches);

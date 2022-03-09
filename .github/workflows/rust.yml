@@ -25,10 +25,8 @@ jobs:
         gcloud beta emulators bigtable start --host-port ${BIGTABLE_EMULATOR_HOST} &
     - name: Seed Bigtable Emulator
       run: |
-        cbt -instance dev -project emulator  createtable weather_balloons
-        cbt -instance dev -project emulator  createfamily weather_balloons measurements
-        cbt -instance dev -project emulator set weather_balloons us-west2#3698#2021-03-05-1200 measurements:pressure=94558@1646637317700000
+        ./script/seed.sh
     - name: Build
-      run: cargo build --verbose
+      run: cargo build
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test
