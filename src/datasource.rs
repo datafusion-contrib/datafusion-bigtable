@@ -23,8 +23,8 @@ use datafusion::physical_plan::Partitioning;
 use datafusion::physical_plan::SendableRecordBatchStream;
 use datafusion::physical_plan::Statistics;
 
-// use arrow::array::Int64Array;
 use arrow::array::ArrayRef;
+use arrow::array::Int64Array;
 use arrow::array::StringArray;
 use arrow::array::TimestampMicrosecondArray;
 use arrow::record_batch::RecordBatch;
@@ -37,7 +37,7 @@ use bigtable_rs::google::bigtable::v2::RowFilter;
 use bigtable_rs::google::bigtable::v2::RowRange;
 use bigtable_rs::google::bigtable::v2::RowSet;
 
-// use byteorder::{BigEndian, ByteOrder};
+use byteorder::{BigEndian, ByteOrder};
 
 mod composer;
 
@@ -278,7 +278,7 @@ impl ExecutionPlan for BigtableExec {
             Ok(resp) => {
                 let mut rowkey_timestamp_qualifier_value: HashMap<
                     String,
-                    HashMap<i64, HashMap<String, String>>,
+                    HashMap<i64, HashMap<String, Vec<u8>>>,
                 > = HashMap::new();
                 resp.into_iter().for_each(|(key, data)| {
                     let row_key = String::from_utf8(key.clone()).unwrap();
@@ -294,21 +294,19 @@ impl ExecutionPlan for BigtableExec {
                             .or_insert(HashMap::new());
 
                         let qualifier = String::from_utf8(row_cell.qualifier).unwrap();
-                        // let cell_value = BigEndian::read_i64(&row_cell.value);
-                        let cell_value = String::from_utf8(row_cell.value).unwrap();
                         rowkey_timestamp_qualifier_value
                             .get_mut(&row_key)
                             .unwrap()
                             .get_mut(&timestamp)
                             .unwrap()
                             .entry(qualifier)
-                            .or_insert(cell_value);
+                            .or_insert(row_cell.value);
                     })
                 });
 
                 let mut row_keys = vec![];
                 let mut timestamps = vec![];
-                let mut qualifier_values: HashMap<String, Vec<String>> = HashMap::new();
+                let mut qualifier_values: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
                 for field in self.projected_schema.fields() {
                     if self.datasource.is_qualifier(field.name()) {
                         qualifier_values.insert(field.name().clone(), vec![]);
@@ -332,10 +330,7 @@ impl ExecutionPlan for BigtableExec {
                                             .push(cell_value.to_owned());
                                     }
                                     _ => {
-                                        qualifier_values
-                                            .get_mut(qualifier)
-                                            .unwrap()
-                                            .push("".to_owned());
+                                        qualifier_values.get_mut(qualifier).unwrap().push(vec![]);
                                     }
                                 }
                             }
@@ -350,9 +345,23 @@ impl ExecutionPlan for BigtableExec {
                 for field in self.projected_schema.fields() {
                     if self.datasource.is_qualifier(field.name()) {
                         let qualifier = field.name();
-                        data.push(Arc::new(StringArray::from(
-                            qualifier_values.get(qualifier).unwrap().clone(),
-                        )));
+                        match field.data_type() {
+                            DataType::Int64 => {
+                                let mut decoded_values: Vec<i64> = vec![];
+                                for encoded_value in qualifier_values.get(qualifier).unwrap() {
+                                    decoded_values.push(BigEndian::read_i64(encoded_value));
+                                }
+                                data.push(Arc::new(Int64Array::from(decoded_values)));
+                            }
+                            _ => {
+                                let mut decoded_values: Vec<String> = vec![];
+                                for encoded_value in qualifier_values.get(qualifier).unwrap() {
+                                    decoded_values
+                                        .push(String::from_utf8(encoded_value.to_vec()).unwrap());
+                                }
+                                data.push(Arc::new(StringArray::from(decoded_values)));
+                            }
+                        }
                     }
                 }
 
@@ -416,8 +425,11 @@ mod tests {
             "weather_balloons".to_owned(),
             "measurements".to_owned(),
             vec![RESERVED_ROWKEY.to_owned()],
-            // vec![Field::new("pressure", DataType::Int64, false)],
-            vec![Field::new("pressure", DataType::Utf8, false)],
+            vec![
+                Field::new("pressure", DataType::Int64, false),
+                // Bigtable does not support float number, so store as string
+                Field::new("temperature", DataType::Utf8, false),
+            ],
             true,
         )
         .await
@@ -437,11 +449,11 @@ mod tests {
 
         batches = ctx.sql("SELECT * FROM weather_balloons where \"_row_key\" = 'us-west2#3698#2021-03-05-1200'").await?.collect().await?;
         expected = vec![
-            "+-------------------------------+-------------------------+----------+",
-            "| _row_key                      | _timestamp              | pressure |",
-            "+-------------------------------+-------------------------+----------+",
-            "| us-west2#3698#2021-03-05-1200 | 2021-03-05 12:00:05.100 | 94558    |",
-            "+-------------------------------+-------------------------+----------+",
+            "+-------------------------------+-------------------------+----------+-------------+",
+            "| _row_key                      | _timestamp              | pressure | temperature |",
+            "+-------------------------------+-------------------------+----------+-------------+",
+            "| us-west2#3698#2021-03-05-1200 | 2021-03-05 12:00:05.100 | 94558    | 9.6         |",
+            "+-------------------------------+-------------------------+----------+-------------+",
         ];
         assert_batches_eq!(expected, &batches);
 

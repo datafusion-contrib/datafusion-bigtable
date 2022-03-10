@@ -23,9 +23,15 @@ jobs:
       run: |
         gcloud components install beta bigtable cbt
         gcloud beta emulators bigtable start --host-port ${BIGTABLE_EMULATOR_HOST} &
+    - name: Setup Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: "3.9"
     - name: Seed Bigtable Emulator
       run: |
-        ./script/seed.sh
+        ./script/create_table.sh
+        pip install google-cloud-bigtable==2.4.0
+        python ./script/insert_rows.py
     - name: Build
       run: cargo build
     - name: Run tests
