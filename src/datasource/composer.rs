@@ -10,21 +10,38 @@ use datafusion::scalar::ScalarValue;
 
 pub fn compose(
     datasource: BigtableDataSource,
-    _projection: &Option<Vec<usize>>,
+    projection: &Option<Vec<usize>>,
     filters: &[Expr],
 ) -> Result<(Vec<RowRange>, Vec<RowFilter>)> {
-    let mut row_ranges = vec![];
-    let mut row_filters = if datasource.only_read_latest {
-        vec![RowFilter {
-            filter: Some(Filter::CellsPerColumnLimitFilter(1)),
-        }]
-    } else {
-        vec![]
-    };
-    row_filters.push(RowFilter {
+    let mut row_filters = vec![RowFilter {
         filter: Some(Filter::FamilyNameRegexFilter(datasource.column_family)),
-    });
+    }];
+    if datasource.only_read_latest {
+        row_filters.push(RowFilter {
+            filter: Some(Filter::CellsPerColumnLimitFilter(1)),
+        });
+    }
 
+    let mut qualifiers: Vec<String> = vec![];
+    let fields = datasource.schema.fields();
+    match projection {
+        Some(positions) => {
+            for &position in positions {
+                let field = fields[position].clone();
+                if !datasource.table_partition_cols.contains(&field.name()) {
+                    qualifiers.push(field.name().clone())
+                }
+            }
+            row_filters.push(RowFilter {
+                filter: Some(Filter::ColumnQualifierRegexFilter(
+                    qualifiers.join("|").into_bytes(),
+                )),
+            });
+        }
+        _ => (),
+    }
+
+    let mut row_ranges = vec![];
     for filter in filters {
         match filter {
             Expr::BinaryExpr { left, op, right } => match left.as_ref() {

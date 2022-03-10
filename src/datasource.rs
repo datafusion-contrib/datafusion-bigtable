@@ -435,6 +435,16 @@ mod tests {
         ];
         assert_batches_eq!(expected, &batches);
 
+        batches = ctx.sql("SELECT * FROM weather_balloons where \"_row_key\" = 'us-west2#3698#2021-03-05-1200'").await?.collect().await?;
+        expected = vec![
+            "+-------------------------------+-------------------------+----------+",
+            "| _row_key                      | _timestamp              | pressure |",
+            "+-------------------------------+-------------------------+----------+",
+            "| us-west2#3698#2021-03-05-1200 | 2021-03-05 12:00:05.100 | 94558    |",
+            "+-------------------------------+-------------------------+----------+",
+        ];
+        assert_batches_eq!(expected, &batches);
+
         batches = ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons where \"_row_key\" IN ('us-west2#3698#2021-03-05-1200', 'us-west2#3698#2021-03-05-1201') ORDER BY \"_row_key\"").await?.collect().await?;
         expected = vec![
             "+-------------------------------+----------+-------------------------+",
