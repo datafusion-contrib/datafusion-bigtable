@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::datasource::BigtableDataSource;
 use bigtable_rs::google::bigtable::v2::row_filter::Filter;
 use bigtable_rs::google::bigtable::v2::row_range::EndKey;
@@ -42,6 +44,8 @@ pub fn compose(
     }
 
     let mut row_ranges = vec![];
+    let mut table_partition_col_mapping: HashMap<String, String> = HashMap::new();
+
     for filter in filters {
         match filter {
             Expr::BinaryExpr { left, op, right } => match left.as_ref() {
@@ -50,14 +54,8 @@ pub fn compose(
                         match op {
                             Operator::Eq => match right.as_ref() {
                                 Expr::Literal(ScalarValue::Utf8(Some(key))) => {
-                                    row_ranges.push(RowRange {
-                                        start_key: Some(StartKey::StartKeyClosed(
-                                            key.clone().into_bytes(),
-                                        )),
-                                        end_key: Some(EndKey::EndKeyClosed(
-                                            key.clone().into_bytes(),
-                                        )),
-                                    })
+                                    table_partition_col_mapping
+                                        .insert(col.name.clone(), key.clone());
                                 }
                                 _ => (),
                             },
@@ -76,7 +74,7 @@ pub fn compose(
                     if datasource.table_partition_cols.contains(&col.name) {
                         if negated.to_owned() {
                             return Err(DataFusionError::Execution(
-                                "_row_key filter: NOT IN is not supported".to_owned(),
+                                "_row_key: filter NOT IN is not supported".to_owned(),
                             ));
                         }
                         for right in list {
@@ -108,7 +106,7 @@ pub fn compose(
                     if datasource.table_partition_cols.contains(&col.name) {
                         if negated.to_owned() {
                             return Err(DataFusionError::Execution(
-                                "_row_key filter: NOT IN is not supported".to_owned(),
+                                "_row_key: filter NOT IN is not supported".to_owned(),
                             ));
                         }
                         match low.as_ref() {
@@ -136,9 +134,32 @@ pub fn compose(
         }
     }
 
+    if !table_partition_col_mapping.is_empty() {
+        let mut key_parts: Vec<String> = vec![];
+        for table_partition_col in datasource.table_partition_cols {
+            match table_partition_col_mapping.get(&table_partition_col) {
+                Some(value) => {
+                    key_parts.push(value.to_owned());
+                }
+                _ => {
+                    return Err(DataFusionError::Execution(format!(
+                        "{}: filter is required",
+                        table_partition_col
+                    )));
+                }
+            }
+        }
+
+        let key = key_parts.join(&datasource.table_partition_separator);
+        row_ranges.push(RowRange {
+            start_key: Some(StartKey::StartKeyClosed(key.clone().into_bytes())),
+            end_key: Some(EndKey::EndKeyClosed(key.clone().into_bytes())),
+        });
+    }
+
     if row_ranges.is_empty() {
         return Err(DataFusionError::Execution(
-            "_row_key filter is not provided or not supported".to_owned(),
+            "_row_key: filter is not provided or not supported".to_owned(),
         ));
     }
 

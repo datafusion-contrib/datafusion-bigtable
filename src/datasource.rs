@@ -85,6 +85,7 @@ impl BigtableDataSource {
         table: String,
         column_family: String,
         table_partition_cols: Vec<String>,
+        table_partition_separator: String,
         columns: Vec<Field>,
         only_read_latest: bool,
     ) -> Result<Self> {
@@ -116,7 +117,7 @@ impl BigtableDataSource {
                 table: table,
                 column_family: column_family,
                 table_partition_cols: table_partition_cols,
-                table_partition_separator: DEFAULT_SEPARATOR.to_owned(),
+                table_partition_separator: table_partition_separator,
                 only_read_latest: only_read_latest,
                 schema: Arc::new(Schema::new(table_fields)),
                 connection: connection,
@@ -304,7 +305,7 @@ impl ExecutionPlan for BigtableExec {
                     })
                 });
 
-                let mut row_keys = vec![];
+                let mut table_partition_col_values: HashMap<String, Vec<String>> = HashMap::new();
                 let mut timestamps = vec![];
                 let mut qualifier_values: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
                 for field in self.projected_schema.fields() {
@@ -316,7 +317,32 @@ impl ExecutionPlan for BigtableExec {
                 for (row_key, timestamp_qualifier_value) in rowkey_timestamp_qualifier_value.iter()
                 {
                     for (timestamp, qualifier_value) in timestamp_qualifier_value.iter() {
-                        row_keys.push(row_key.to_owned());
+                        if self.datasource.table_partition_cols.len() == 1 {
+                            // no need to split
+                            let table_partition_col = &self.datasource.table_partition_cols[0];
+                            table_partition_col_values
+                                .entry(table_partition_col.to_owned())
+                                .or_insert(vec![]);
+                            table_partition_col_values
+                                .get_mut(table_partition_col)
+                                .unwrap()
+                                .push(row_key.to_owned())
+                        } else {
+                            let parts: Vec<&str> = row_key
+                                .split(&self.datasource.table_partition_separator)
+                                .collect();
+                            for (i, table_partition_col) in
+                                self.datasource.table_partition_cols.iter().enumerate()
+                            {
+                                table_partition_col_values
+                                    .entry(table_partition_col.to_owned())
+                                    .or_insert(vec![]);
+                                table_partition_col_values
+                                    .get_mut(table_partition_col)
+                                    .unwrap()
+                                    .push(parts[i].to_owned())
+                            }
+                        }
                         timestamps.push(timestamp.to_owned());
 
                         for field in self.projected_schema.fields() {
@@ -338,10 +364,16 @@ impl ExecutionPlan for BigtableExec {
                     }
                 }
 
-                let mut data: Vec<ArrayRef> = vec![
-                    Arc::new(StringArray::from(row_keys)),
-                    Arc::new(TimestampMicrosecondArray::from(timestamps)),
-                ];
+                let mut data: Vec<ArrayRef> = vec![];
+                for table_partition_col in self.datasource.table_partition_cols.clone() {
+                    let values: &Vec<String> = table_partition_col_values
+                        .get(&table_partition_col)
+                        .unwrap();
+                    data.push(Arc::new(StringArray::from(values.clone())));
+                }
+
+                data.push(Arc::new(TimestampMicrosecondArray::from(timestamps)));
+
                 for field in self.projected_schema.fields() {
                     if self.datasource.is_qualifier(field.name()) {
                         let qualifier = field.name();
@@ -410,7 +442,7 @@ impl ExecutionPlan for BigtableExec {
 
 #[cfg(test)]
 mod tests {
-    use crate::datasource::{BigtableDataSource, RESERVED_ROWKEY};
+    use crate::datasource::{BigtableDataSource, DEFAULT_SEPARATOR, RESERVED_ROWKEY};
     use arrow::datatypes::{DataType, Field};
     use datafusion::assert_batches_eq;
     use datafusion::error::Result;
@@ -418,13 +450,14 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test]
-    async fn test_sql_query() -> Result<()> {
+    async fn test_simple_row_key() -> Result<()> {
         let bigtable_datasource = BigtableDataSource::new(
             "emulator".to_owned(),
             "dev".to_owned(),
             "weather_balloons".to_owned(),
             "measurements".to_owned(),
             vec![RESERVED_ROWKEY.to_owned()],
+            DEFAULT_SEPARATOR.to_owned(),
             vec![
                 Field::new("pressure", DataType::Int64, false),
                 // Bigtable does not support float number, so store as string
@@ -477,6 +510,43 @@ mod tests {
             "| us-west2#3698#2021-03-05-1201 | 94122    | 2021-03-05 12:01:05.200 |",
             "| us-west2#3698#2021-03-05-1202 | 95992    | 2021-03-05 12:02:05.300 |",
             "+-------------------------------+----------+-------------------------+",
+        ];
+        assert_batches_eq!(expected, &batches);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_composite_row_key() -> Result<()> {
+        let bigtable_datasource = BigtableDataSource::new(
+            "emulator".to_owned(),
+            "dev".to_owned(),
+            "weather_balloons".to_owned(),
+            "measurements".to_owned(),
+            vec![
+                "region".to_owned(),
+                "balloon_id".to_owned(),
+                "event_minute".to_owned(),
+            ],
+            DEFAULT_SEPARATOR.to_owned(),
+            vec![
+                Field::new("pressure", DataType::Int64, false),
+                // Bigtable does not support float number, so store as string
+                Field::new("temperature", DataType::Utf8, false),
+            ],
+            true,
+        )
+        .await
+        .unwrap();
+        let mut ctx = ExecutionContext::new();
+        ctx.register_table("weather_balloons", Arc::new(bigtable_datasource))
+            .unwrap();
+        let batches = ctx.sql("SELECT region, balloon_id, event_minute, pressure, \"_timestamp\" FROM weather_balloons where region = 'us-west2' and balloon_id='3698' and event_minute = '2021-03-05-1200'").await?.collect().await?;
+        let expected = vec![
+            "+----------+------------+-----------------+----------+-------------------------+",
+            "| region   | balloon_id | event_minute    | pressure | _timestamp              |",
+            "+----------+------------+-----------------+----------+-------------------------+",
+            "| us-west2 | 3698       | 2021-03-05-1200 | 94558    | 2021-03-05 12:00:05.100 |",
+            "+----------+------------+-----------------+----------+-------------------------+",
         ];
         assert_batches_eq!(expected, &batches);
         Ok(())

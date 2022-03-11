@@ -14,6 +14,7 @@ let bigtable_datasource = BigtableDataSource::new(
     "weather_balloons".to_owned(),                       // table
     "measurements".to_owned(),                           // column family
     vec!["_row_key".to_owned()],                         // table_partition_cols
+    "#".to_owned(),                                      // table_partition_separator
     vec![Field::new("pressure", DataType::Utf8, false)], // qualifiers
     true,                                                // only_read_latest
 ).await.unwrap();
@@ -35,7 +36,9 @@ ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons whe
 - ✅ select by `"_row_key" =`
 - ✅ select by `"_row_key" IN`
 - ✅ select by `"_row_key" BETWEEN`
-- [ ] select by composite row keys (via `table_partition_cols` and `table_partition_separator`)
+- ✅ select by composite row keys `=`
+- [ ] select by composite row keys `IN`
+- [ ] select by composite row keys `BETWEEN`
 - ✅ Projection pushdown
 - [ ] Predicate push down ([Value range](https://cloud.google.com/bigtable/docs/using-filters#value-range) and [Timestamp range](https://cloud.google.com/bigtable/docs/using-filters#timestamp-range))
 
