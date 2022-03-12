@@ -2,8 +2,17 @@
 name = "datafusion-bigtable"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+include = [
+    "**/*.rs",
+    "README.md",
+    "Cargo.toml",
+]
+license = "Apache-2.0"
+description = "Bigtable data source for Apache Arrow Datafusion"
+homepage = "https://github.com/datafusion-contrib/datafusion-bigtable"
+repository = "https://github.com/datafusion-contrib/datafusion-bigtable"
+readme = "README.md"
+keywords = [ "arrow", "query", "sql", "datafusion", "bigtable" ]
 
 [dependencies]
 datafusion = "7.0.0"
