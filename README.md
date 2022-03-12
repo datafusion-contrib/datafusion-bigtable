@@ -38,7 +38,7 @@ ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons whe
 - ✅ select by `"_row_key" BETWEEN`
 - ✅ select by composite row keys `=`
 - ✅ select by composite row keys `IN`
-- [ ] select by composite row keys `BETWEEN`
+- ✅ select by composite row keys `BETWEEN` (only supported by last table_partition_cols)
 
 ### General
 
@@ -46,7 +46,7 @@ ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons whe
 - [ ] Predicate push down
     + [Value range](https://cloud.google.com/bigtable/docs/using-filters#value-range)
     + [Value Regex](https://cloud.google.com/bigtable/docs/using-filters#value-regex)
-    + [Timestamp range](https://cloud.google.com/bigtable/docs/using-filters#timestamp-range))
+    + [Timestamp range](https://cloud.google.com/bigtable/docs/using-filters#timestamp-range)
 - [ ] Multi Thread or Partition aware execution
 - [ ] Production ready Bigtable SDK in Rust
 

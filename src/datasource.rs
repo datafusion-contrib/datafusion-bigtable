@@ -560,6 +560,17 @@ mod tests {
             "+----------+------------+-----------------+----------+-------------------------+",
         ];
         assert_batches_eq!(expected, &batches);
+
+        batches = ctx.sql("SELECT region, balloon_id, event_minute, pressure, \"_timestamp\" FROM weather_balloons where region = 'us-west2' and balloon_id IN ('3698') and event_minute BETWEEN '2021-03-05-1200' AND '2021-03-05-1201' ORDER BY \"_timestamp\"").await?.collect().await?;
+        expected = vec![
+            "+----------+------------+-----------------+----------+-------------------------+",
+            "| region   | balloon_id | event_minute    | pressure | _timestamp              |",
+            "+----------+------------+-----------------+----------+-------------------------+",
+            "| us-west2 | 3698       | 2021-03-05-1200 | 94558    | 2021-03-05 12:00:05.100 |",
+            "| us-west2 | 3698       | 2021-03-05-1201 | 94122    | 2021-03-05 12:01:05.200 |",
+            "+----------+------------+-----------------+----------+-------------------------+",
+        ];
+        assert_batches_eq!(expected, &batches);
         Ok(())
     }
 }
