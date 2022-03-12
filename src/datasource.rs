@@ -490,7 +490,7 @@ mod tests {
         ];
         assert_batches_eq!(expected, &batches);
 
-        batches = ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons where \"_row_key\" IN ('us-west2#3698#2021-03-05-1200', 'us-west2#3698#2021-03-05-1201') ORDER BY \"_row_key\"").await?.collect().await?;
+        batches = ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons where \"_row_key\" IN ('us-west2#3698#2021-03-05-1200', 'us-west2#3698#2021-03-05-1201') ORDER BY \"_timestamp\"").await?.collect().await?;
         expected = vec![
             "+-------------------------------+----------+-------------------------+",
             "| _row_key                      | pressure | _timestamp              |",
@@ -501,7 +501,7 @@ mod tests {
         ];
         assert_batches_eq!(expected, &batches);
 
-        batches = ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons where \"_row_key\" BETWEEN 'us-west2#3698#2021-03-05-1200' AND 'us-west2#3698#2021-03-05-1202' ORDER BY \"_row_key\"").await?.collect().await?;
+        batches = ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons where \"_row_key\" BETWEEN 'us-west2#3698#2021-03-05-1200' AND 'us-west2#3698#2021-03-05-1202' ORDER BY \"_timestamp\"").await?.collect().await?;
         expected = vec![
             "+-------------------------------+----------+-------------------------+",
             "| _row_key                      | pressure | _timestamp              |",
@@ -540,12 +540,23 @@ mod tests {
         let mut ctx = ExecutionContext::new();
         ctx.register_table("weather_balloons", Arc::new(bigtable_datasource))
             .unwrap();
-        let batches = ctx.sql("SELECT region, balloon_id, event_minute, pressure, \"_timestamp\" FROM weather_balloons where region = 'us-west2' and balloon_id='3698' and event_minute = '2021-03-05-1200'").await?.collect().await?;
-        let expected = vec![
+        let mut batches = ctx.sql("SELECT region, balloon_id, event_minute, pressure, \"_timestamp\" FROM weather_balloons where region = 'us-west2' and balloon_id='3698' and event_minute = '2021-03-05-1200'").await?.collect().await?;
+        let mut expected = vec![
             "+----------+------------+-----------------+----------+-------------------------+",
             "| region   | balloon_id | event_minute    | pressure | _timestamp              |",
             "+----------+------------+-----------------+----------+-------------------------+",
             "| us-west2 | 3698       | 2021-03-05-1200 | 94558    | 2021-03-05 12:00:05.100 |",
+            "+----------+------------+-----------------+----------+-------------------------+",
+        ];
+        assert_batches_eq!(expected, &batches);
+
+        batches = ctx.sql("SELECT region, balloon_id, event_minute, pressure, \"_timestamp\" FROM weather_balloons where region = 'us-west2' and balloon_id IN ('3698') and event_minute IN ('2021-03-05-1200', '2021-03-05-1201') ORDER BY \"_timestamp\"").await?.collect().await?;
+        expected = vec![
+            "+----------+------------+-----------------+----------+-------------------------+",
+            "| region   | balloon_id | event_minute    | pressure | _timestamp              |",
+            "+----------+------------+-----------------+----------+-------------------------+",
+            "| us-west2 | 3698       | 2021-03-05-1200 | 94558    | 2021-03-05 12:00:05.100 |",
+            "| us-west2 | 3698       | 2021-03-05-1201 | 94122    | 2021-03-05 12:01:05.200 |",
             "+----------+------------+-----------------+----------+-------------------------+",
         ];
         assert_batches_eq!(expected, &batches);

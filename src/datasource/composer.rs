@@ -44,7 +44,7 @@ pub fn compose(
     }
 
     let mut row_ranges = vec![];
-    let mut table_partition_col_mapping: HashMap<String, String> = HashMap::new();
+    let mut table_partition_col_mapping: HashMap<String, Vec<String>> = HashMap::new();
 
     for filter in filters {
         match filter {
@@ -55,7 +55,12 @@ pub fn compose(
                             Operator::Eq => match right.as_ref() {
                                 Expr::Literal(ScalarValue::Utf8(Some(key))) => {
                                     table_partition_col_mapping
-                                        .insert(col.name.clone(), key.clone());
+                                        .entry(col.name.to_owned())
+                                        .or_insert(vec![]);
+                                    table_partition_col_mapping
+                                        .get_mut(&col.name)
+                                        .unwrap()
+                                        .push(key.clone())
                                 }
                                 _ => (),
                             },
@@ -80,14 +85,13 @@ pub fn compose(
                         for right in list {
                             match right {
                                 Expr::Literal(ScalarValue::Utf8(Some(key))) => {
-                                    row_ranges.push(RowRange {
-                                        start_key: Some(StartKey::StartKeyClosed(
-                                            key.clone().into_bytes(),
-                                        )),
-                                        end_key: Some(EndKey::EndKeyClosed(
-                                            key.clone().into_bytes(),
-                                        )),
-                                    })
+                                    table_partition_col_mapping
+                                        .entry(col.name.to_owned())
+                                        .or_insert(vec![]);
+                                    table_partition_col_mapping
+                                        .get_mut(&col.name)
+                                        .unwrap()
+                                        .push(key.clone())
                                 }
                                 _ => (),
                             }
@@ -135,11 +139,23 @@ pub fn compose(
     }
 
     if !table_partition_col_mapping.is_empty() {
-        let mut key_parts: Vec<String> = vec![];
+        let mut batch_parts: Vec<Vec<String>> = vec![];
         for table_partition_col in datasource.table_partition_cols {
             match table_partition_col_mapping.get(&table_partition_col) {
-                Some(value) => {
-                    key_parts.push(value.to_owned());
+                Some(list) => {
+                    if batch_parts.is_empty() {
+                        // initialize
+                        // batch_parts = [], list = ["us-east1", "us-west2"]
+                        // => batch_parts = [ ["us-east1"], ["us-west2"] ]
+                        for value in list {
+                            batch_parts.push(vec![value.to_owned()]);
+                        }
+                    } else {
+                        // cross product
+                        // batch_parts = [ ["us-east1"], ["us-west2"] ], list = ["3698", "3700"]
+                        // => batch_parts = [ ["us-east1", "3698"], ["us-west2", "3698"], ["us-east1", "3700"], ["us-west2", "3700"] ]
+                        batch_parts = partial_cartesian(batch_parts, list);
+                    }
                 }
                 _ => {
                     return Err(DataFusionError::Execution(format!(
@@ -150,11 +166,13 @@ pub fn compose(
             }
         }
 
-        let key = key_parts.join(&datasource.table_partition_separator);
-        row_ranges.push(RowRange {
-            start_key: Some(StartKey::StartKeyClosed(key.clone().into_bytes())),
-            end_key: Some(EndKey::EndKeyClosed(key.clone().into_bytes())),
-        });
+        for parts in batch_parts {
+            let key = parts.join(&datasource.table_partition_separator);
+            row_ranges.push(RowRange {
+                start_key: Some(StartKey::StartKeyClosed(key.clone().into_bytes())),
+                end_key: Some(EndKey::EndKeyClosed(key.clone().into_bytes())),
+            });
+        }
     }
 
     if row_ranges.is_empty() {
@@ -164,4 +182,19 @@ pub fn compose(
     }
 
     Ok((row_ranges, row_filters))
+}
+
+pub fn partial_cartesian<T: Clone>(a: Vec<Vec<T>>, b: &[T]) -> Vec<Vec<T>> {
+    a.into_iter()
+        .flat_map(|xs| {
+            b.iter()
+                .cloned()
+                .map(|y| {
+                    let mut vec = xs.clone();
+                    vec.push(y);
+                    vec
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
