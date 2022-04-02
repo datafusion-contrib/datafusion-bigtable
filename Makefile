@@ -8,6 +8,9 @@ seed:
 # 	docker run --rm -e BIGTABLE_EMULATOR_HOST="host.docker.internal:8086" -v $(CURDIR)/script:/opt/script python:3.9 /bin/bash -c "pip install google-cloud-bigtable==2.4.0 && python /opt/script/insert_rows.py"
 	pip install google-cloud-bigtable==2.4.0 && BIGTABLE_EMULATOR_HOST="localhost:8086" python ./script/insert_rows.py
 
+check:
+	cargo check
+
 build:
 	cargo build
 
