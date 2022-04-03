@@ -15,5 +15,6 @@ name = "datafusion_bigtable._internal"
 pyo3 = { version = "~0.15", features = ["extension-module"] }
 tokio = { version = "1.0", features = ["macros", "rt", "rt-multi-thread", "sync"] }
 datafusion = { version = "^7.0.0", features = ["pyarrow"] }
+datafusion-python = { git = "https://github.com/jychen7/datafusion-python", branch = "register-table" }
 datafusion-bigtable = { version = "0.1.0" }
 arrow = { version = "9.0.0", features = ["prettyprint"] }
