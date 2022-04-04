@@ -4,12 +4,15 @@ use std::sync::Arc;
 use datafusion_bigtable::datasource::BigtableDataSource;
 
 use arrow::datatypes::{DataType, Field};
+use datafusion::datasource::TableProvider;
 use datafusion_python::catalog::PyTable;
 use datafusion_python::errors::DataFusionError;
 use datafusion_python::utils::wait_for_future;
 
-#[pyclass(name = "BigtableTable", module = "datafusion_bigtable", extends=PyTable, subclass)]
-pub(crate) struct PyBigtableTable {}
+#[pyclass(name = "BigtableTable", module = "datafusion_bigtable", subclass)]
+pub(crate) struct PyBigtableTable {
+    table: Arc<dyn TableProvider>
+}
 
 #[pymethods]
 impl PyBigtableTable {
@@ -25,7 +28,7 @@ impl PyBigtableTable {
         str_qualifiers: Vec<String>,
         only_read_latest: bool,
         py: Python,
-    ) -> PyResult<(Self, PyTable)> {
+    ) -> PyResult<Self> {
         let mut columns: Vec<Field> = vec![];
         for qualifier in &int_qualifiers {
             columns.push(Field::new(qualifier, DataType::Int64, false))
@@ -45,6 +48,12 @@ impl PyBigtableTable {
         );
         let source = wait_for_future(py, result).map_err(DataFusionError::from)?;
 
-        Ok((Self {}, PyTable::new(Arc::new(source))))
+        Ok(Self{
+            table: Arc::new(source)
+        })
+    }
+
+    fn to_pytable(&self) -> PyResult<PyTable> {
+        Ok(PyTable::new(self.table.clone()))
     }
 }

@@ -24,7 +24,7 @@ def bigtable_table():
 
 
 def test_sql(ctx, bigtable_table):
-    ctx.register_table("weather_balloons", bigtable_table)
+    ctx.register_table("weather_balloons", bigtable_table.to_pytable())
     result = ctx.sql(
         "SELECT * FROM weather_balloons where region = 'us-west2' and balloon_id IN ('3698') and event_minute BETWEEN '2021-03-05-1200' AND '2021-03-05-1201' ORDER BY \"_timestamp\""
     ).collect()
