@@ -1,6 +1,6 @@
 [package]
 name = "datafusion-bigtable-python"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -9,12 +9,15 @@ name = "_internal"
 crate-type = ["cdylib"]
 
 [package.metadata.maturin]
-name = "datafusion_bigtable._internal"
+# datafusion-python have used "datafusion._internal"
+# if use "datafusion_bigtable._internal", somehow python import can not find correct module
+# so use "datafusion_bigtable._private"
+name = "datafusion_bigtable._private"
 
 [dependencies]
 pyo3 = { version = "~0.15", features = ["extension-module"] }
 tokio = { version = "1.0", features = ["macros", "rt", "rt-multi-thread", "sync"] }
 datafusion = { version = "^7.0.0", features = ["pyarrow"] }
-datafusion-python = { git = "https://github.com/jychen7/datafusion-python", branch = "register-table" }
+datafusion-python = { git = "https://github.com/jychen7/datafusion-python", branch = "pyo3-module-link" }
 datafusion-bigtable = { version = "0.1.0" }
 arrow = { version = "9.0.0", features = ["prettyprint"] }

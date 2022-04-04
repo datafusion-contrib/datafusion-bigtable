@@ -423,7 +423,7 @@ dependencies = [
 
 [[package]]
 name = "datafusion-bigtable-python"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arrow",
  "datafusion",
@@ -461,13 +461,14 @@ dependencies = [
 [[package]]
 name = "datafusion-python"
 version = "0.5.1"
-source = "git+https://github.com/jychen7/datafusion-python?branch=register-table#8c1f0419dda27c8423fbf87a79271ce85107ab92"
+source = "git+https://github.com/jychen7/datafusion-python?branch=pyo3-module-link#2c19a4f9c1196c697a91599fea3bba6787a14c20"
 dependencies = [
  "datafusion",
  "datafusion-common",
  "datafusion-expr",
  "mimalloc",
  "pyo3",
+ "pyo3-build-config",
  "rand 0.7.3",
  "tokio",
  "uuid",
