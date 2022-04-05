@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "a6cb6b63a005fd65887a6cc11a2b73551c9db6fafddc6a1356be5c59720c3e6e"
+            "sha256": "7921c2ed0d840d821a1af67e7759bf63498de8ef90a791a30b182d422a05a757"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -18,14 +18,14 @@
     "default": {
         "datafusion": {
             "hashes": [
-                "sha256:03d869fa21118bfae3e370e64718b90ec9f42ea537bfb83e222804cd58aeec4b",
-                "sha256:70de3ec90989703ace9c4df40f5bd1e4d4a793dfd08cfc2004f61a60dd01a207",
-                "sha256:bb2989684cdfa487662985a4ea63567020a95d9f1a0191b37efef0db73513597",
-                "sha256:da2cd30a23c4f5a804c924671279691066a8f4f668e22b7d2b2859e5baded76e",
-                "sha256:fa4d8d8d23e65b06dd51406e4c207c5abc1cc222d9b20c789c07b2413ff99810"
+                "sha256:2f10e3fc61367a8017907cc0a9e0aa18dc80fd04b8b3413a90147c37a9e40bab",
+                "sha256:3a888707fcfdb4a4f7412f05a7c68e8d884db3bae1e5218916452cba07658e9a",
+                "sha256:7bc19fbc01d42690b4698f1a8207b110a0e51bd8de2a5725fc86431b7c4ed8cd",
+                "sha256:8b96d50651c73f50ecc59198158b9a773dd1a37c346fa262cfcb1988c13d1fcf",
+                "sha256:e664456e76409def5cf18fcb2c2710b244690bb1e13057770a69dd77e9efa2a9"
             ],
             "index": "pypi",
-            "version": "==0.5.1"
+            "version": "==0.5.2"
         },
         "maturin": {
             "hashes": [

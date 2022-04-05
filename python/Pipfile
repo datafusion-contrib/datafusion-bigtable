@@ -5,7 +5,7 @@ name = "pypi"
 
 [packages]
 maturin = "==0.12.11"
-datafusion = "==0.5.1"
+datafusion = "==0.5.2"
 
 [dev-packages]
 pytest = "==7.1.1"

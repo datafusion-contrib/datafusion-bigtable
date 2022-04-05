@@ -460,8 +460,8 @@ dependencies = [
 
 [[package]]
 name = "datafusion-python"
-version = "0.5.1"
-source = "git+https://github.com/jychen7/datafusion-python?branch=pyo3-module-link#2c19a4f9c1196c697a91599fea3bba6787a14c20"
+version = "0.5.2"
+source = "git+https://github.com/jychen7/datafusion-python?branch=pyo3-module-link#1936fe0363ea94c93ec2f878c9a4c19726c78004"
 dependencies = [
  "datafusion",
  "datafusion-common",
