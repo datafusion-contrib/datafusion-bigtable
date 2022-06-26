@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -6,7 +7,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use arrow::datatypes::{DataType, SchemaRef};
-use std::collections::HashMap;
 use arrow::array::ArrayRef;
 use arrow::array::Int64Array;
 use arrow::array::StringArray;
@@ -22,8 +22,9 @@ use bigtable_rs::google::bigtable::v2::RowSet;
 
 use byteorder::{BigEndian, ByteOrder};
 
+use datafusion::arrow::error::{ArrowError, Result as ArrowResult};
 use datafusion::error::{DataFusionError, Result};
-use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion::execution::context::TaskContext;
 
 use datafusion::physical_plan::expressions::PhysicalSortExpr;
 use datafusion::physical_plan::memory::MemoryStream;
@@ -35,6 +36,9 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::Partitioning;
 use datafusion::physical_plan::SendableRecordBatchStream;
 use datafusion::physical_plan::Statistics;
+use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+
+use futures::{Stream, TryFutureExt, TryStreamExt};
 
 use crate::datasource::BigtableDataSource;
 
@@ -93,11 +97,11 @@ impl ExecutionPlan for BigtableExec {
     /// Returns a new plan where all children were replaced by new plans.
     /// The size of `children` must be equal to the size of `ExecutionPlan::children()`.
     fn with_new_children(
-        &self,
+        self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         if children.is_empty() {
-            Ok(Arc::new(self.clone()))
+            Ok(self)
         } else {
             Err(DataFusionError::Internal(format!(
                 "Children cannot be replaced in {:?}",
@@ -107,156 +111,16 @@ impl ExecutionPlan for BigtableExec {
     }
 
     /// creates an iterator
-    async fn execute(
+    fn execute(
         &self,
         _partition: usize,
-        _runtime: Arc<RuntimeEnv>,
+        _context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        let mut bigtable = self.datasource.connection.client();
-        let request = ReadRowsRequest {
-            table_name: bigtable.get_full_table_name(&self.datasource.table),
-            rows: Some(RowSet {
-                row_keys: vec![],
-                row_ranges: self.row_ranges.clone(),
-            }),
-            filter: Some(RowFilter {
-                filter: Some(Filter::Chain(Chain {
-                    filters: self.row_filters.clone(),
-                })),
-            }),
-            ..ReadRowsRequest::default()
-        };
-
-        match bigtable.read_rows(request).await {
-            Err(err) => Err(DataFusionError::External(Box::new(err))),
-            Ok(resp) => {
-                let mut rowkey_timestamp_qualifier_value: HashMap<
-                    String,
-                    HashMap<i64, HashMap<String, Vec<u8>>>,
-                > = HashMap::new();
-                resp.into_iter().for_each(|(key, data)| {
-                    let row_key = String::from_utf8(key.clone()).unwrap();
-                    rowkey_timestamp_qualifier_value
-                        .entry(row_key.to_owned())
-                        .or_insert(HashMap::new());
-                    data.into_iter().for_each(|row_cell| {
-                        let timestamp = row_cell.timestamp_micros;
-                        rowkey_timestamp_qualifier_value
-                            .get_mut(&row_key)
-                            .unwrap()
-                            .entry(timestamp)
-                            .or_insert(HashMap::new());
-
-                        let qualifier = String::from_utf8(row_cell.qualifier).unwrap();
-                        rowkey_timestamp_qualifier_value
-                            .get_mut(&row_key)
-                            .unwrap()
-                            .get_mut(&timestamp)
-                            .unwrap()
-                            .entry(qualifier)
-                            .or_insert(row_cell.value);
-                    })
-                });
-
-                let mut table_partition_col_values: HashMap<String, Vec<String>> = HashMap::new();
-                let mut timestamps = vec![];
-                let mut qualifier_values: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-                for field in self.projected_schema.fields() {
-                    if self.datasource.is_qualifier(field.name()) {
-                        qualifier_values.insert(field.name().clone(), vec![]);
-                    }
-                }
-
-                for (row_key, timestamp_qualifier_value) in rowkey_timestamp_qualifier_value.iter()
-                {
-                    for (timestamp, qualifier_value) in timestamp_qualifier_value.iter() {
-                        if self.datasource.table_partition_cols.len() == 1 {
-                            // no need to split
-                            let table_partition_col = &self.datasource.table_partition_cols[0];
-                            table_partition_col_values
-                                .entry(table_partition_col.to_owned())
-                                .or_insert(vec![]);
-                            table_partition_col_values
-                                .get_mut(table_partition_col)
-                                .unwrap()
-                                .push(row_key.to_owned())
-                        } else {
-                            let parts: Vec<&str> = row_key
-                                .split(&self.datasource.table_partition_separator)
-                                .collect();
-                            for (i, table_partition_col) in
-                                self.datasource.table_partition_cols.iter().enumerate()
-                            {
-                                table_partition_col_values
-                                    .entry(table_partition_col.to_owned())
-                                    .or_insert(vec![]);
-                                table_partition_col_values
-                                    .get_mut(table_partition_col)
-                                    .unwrap()
-                                    .push(parts[i].to_owned())
-                            }
-                        }
-                        timestamps.push(timestamp.to_owned());
-
-                        for field in self.projected_schema.fields() {
-                            if self.datasource.is_qualifier(field.name()) {
-                                let qualifier = field.name();
-                                match qualifier_value.get(qualifier) {
-                                    Some(cell_value) => {
-                                        qualifier_values
-                                            .get_mut(qualifier)
-                                            .unwrap()
-                                            .push(cell_value.to_owned());
-                                    }
-                                    _ => {
-                                        qualifier_values.get_mut(qualifier).unwrap().push(vec![]);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let mut data: Vec<ArrayRef> = vec![];
-                for table_partition_col in self.datasource.table_partition_cols.clone() {
-                    let values: &Vec<String> = table_partition_col_values
-                        .get(&table_partition_col)
-                        .unwrap();
-                    data.push(Arc::new(StringArray::from(values.clone())));
-                }
-
-                data.push(Arc::new(TimestampMicrosecondArray::from(timestamps)));
-
-                for field in self.projected_schema.fields() {
-                    if self.datasource.is_qualifier(field.name()) {
-                        let qualifier = field.name();
-                        match field.data_type() {
-                            DataType::Int64 => {
-                                let mut decoded_values: Vec<i64> = vec![];
-                                for encoded_value in qualifier_values.get(qualifier).unwrap() {
-                                    decoded_values.push(BigEndian::read_i64(encoded_value));
-                                }
-                                data.push(Arc::new(Int64Array::from(decoded_values)));
-                            }
-                            _ => {
-                                let mut decoded_values: Vec<String> = vec![];
-                                for encoded_value in qualifier_values.get(qualifier).unwrap() {
-                                    decoded_values
-                                        .push(String::from_utf8(encoded_value.to_vec()).unwrap());
-                                }
-                                data.push(Arc::new(StringArray::from(decoded_values)));
-                            }
-                        }
-                    }
-                }
-
-                Ok(Box::pin(MemoryStream::try_new(
-                    vec![RecordBatch::try_new(self.schema(), data)?],
-                    self.schema(),
-                    None,
-                )?))
-            }
-        }
+        let stream = futures::stream::once(
+            execute_query(self.clone()).map_err(|e| ArrowError::ExternalError(Box::new(e)))
+        ).try_flatten();
+        let schema = self.schema();
+        Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
     }
 
     /// Return a snapshot of the set of [`Metric`]s for this
@@ -290,6 +154,161 @@ impl ExecutionPlan for BigtableExec {
     }
     fn output_ordering(&self) -> Option<&[PhysicalSortExpr]> {
         todo!()
+    }
+}
+
+async fn execute_query(
+    exec_plan: BigtableExec
+) -> Result<impl Stream<Item = ArrowResult<RecordBatch>> + Send> {
+    let datasource = exec_plan.datasource;
+    let projected_schema = exec_plan.projected_schema;
+    let row_ranges = exec_plan.row_ranges;
+    let row_filters = exec_plan.row_filters;
+
+    let mut bigtable = datasource.connection.client();
+    let request = ReadRowsRequest {
+        table_name: bigtable.get_full_table_name(&datasource.table),
+        rows: Some(RowSet {
+            row_keys: vec![],
+            row_ranges: row_ranges.clone(),
+        }),
+        filter: Some(RowFilter {
+            filter: Some(Filter::Chain(Chain {
+                filters: row_filters.clone(),
+            })),
+        }),
+        ..ReadRowsRequest::default()
+    };
+
+    match bigtable.read_rows(request).await {
+        Err(err) => Err(datafusion::error::DataFusionError::ArrowError(ArrowError::ExternalError(Box::new(err)))),
+        Ok(resp) => {
+            let mut rowkey_timestamp_qualifier_value: HashMap<
+                String,
+                HashMap<i64, HashMap<String, Vec<u8>>>,
+            > = HashMap::new();
+            resp.into_iter().for_each(|(key, data)| {
+                let row_key = String::from_utf8(key.clone()).unwrap();
+                rowkey_timestamp_qualifier_value
+                    .entry(row_key.to_owned())
+                    .or_insert(HashMap::new());
+                data.into_iter().for_each(|row_cell| {
+                    let timestamp = row_cell.timestamp_micros;
+                    rowkey_timestamp_qualifier_value
+                        .get_mut(&row_key)
+                        .unwrap()
+                        .entry(timestamp)
+                        .or_insert(HashMap::new());
+
+                    let qualifier = String::from_utf8(row_cell.qualifier).unwrap();
+                    rowkey_timestamp_qualifier_value
+                        .get_mut(&row_key)
+                        .unwrap()
+                        .get_mut(&timestamp)
+                        .unwrap()
+                        .entry(qualifier)
+                        .or_insert(row_cell.value);
+                })
+            });
+
+            let mut table_partition_col_values: HashMap<String, Vec<String>> = HashMap::new();
+            let mut timestamps = vec![];
+            let mut qualifier_values: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
+            for field in projected_schema.fields() {
+                if datasource.is_qualifier(field.name()) {
+                    qualifier_values.insert(field.name().clone(), vec![]);
+                }
+            }
+
+            for (row_key, timestamp_qualifier_value) in rowkey_timestamp_qualifier_value.iter()
+            {
+                for (timestamp, qualifier_value) in timestamp_qualifier_value.iter() {
+                    if datasource.table_partition_cols.len() == 1 {
+                        // no need to split
+                        let table_partition_col = &datasource.table_partition_cols[0];
+                        table_partition_col_values
+                            .entry(table_partition_col.to_owned())
+                            .or_insert(vec![]);
+                        table_partition_col_values
+                            .get_mut(table_partition_col)
+                            .unwrap()
+                            .push(row_key.to_owned())
+                    } else {
+                        let parts: Vec<&str> = row_key
+                            .split(&datasource.table_partition_separator)
+                            .collect();
+                        for (i, table_partition_col) in
+                            datasource.table_partition_cols.iter().enumerate()
+                        {
+                            table_partition_col_values
+                                .entry(table_partition_col.to_owned())
+                                .or_insert(vec![]);
+                            table_partition_col_values
+                                .get_mut(table_partition_col)
+                                .unwrap()
+                                .push(parts[i].to_owned())
+                        }
+                    }
+                    timestamps.push(timestamp.to_owned());
+
+                    for field in projected_schema.fields() {
+                        if datasource.is_qualifier(field.name()) {
+                            let qualifier = field.name();
+                            match qualifier_value.get(qualifier) {
+                                Some(cell_value) => {
+                                    qualifier_values
+                                        .get_mut(qualifier)
+                                        .unwrap()
+                                        .push(cell_value.to_owned());
+                                }
+                                _ => {
+                                    qualifier_values.get_mut(qualifier).unwrap().push(vec![]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let mut data: Vec<ArrayRef> = vec![];
+            for table_partition_col in datasource.table_partition_cols.clone() {
+                let values: &Vec<String> = table_partition_col_values
+                    .get(&table_partition_col)
+                    .unwrap();
+                data.push(Arc::new(StringArray::from(values.clone())));
+            }
+
+            data.push(Arc::new(TimestampMicrosecondArray::from(timestamps)));
+
+            for field in projected_schema.fields() {
+                if datasource.is_qualifier(field.name()) {
+                    let qualifier = field.name();
+                    match field.data_type() {
+                        DataType::Int64 => {
+                            let mut decoded_values: Vec<i64> = vec![];
+                            for encoded_value in qualifier_values.get(qualifier).unwrap() {
+                                decoded_values.push(BigEndian::read_i64(encoded_value));
+                            }
+                            data.push(Arc::new(Int64Array::from(decoded_values)));
+                        }
+                        _ => {
+                            let mut decoded_values: Vec<String> = vec![];
+                            for encoded_value in qualifier_values.get(qualifier).unwrap() {
+                                decoded_values
+                                    .push(String::from_utf8(encoded_value.to_vec()).unwrap());
+                            }
+                            data.push(Arc::new(StringArray::from(decoded_values)));
+                        }
+                    }
+                }
+            }
+
+            Ok(Box::pin(MemoryStream::try_new(
+                vec![RecordBatch::try_new(projected_schema.clone(), data)?],
+                projected_schema.clone(),
+                None,
+            )?))
+        }
     }
 }
 

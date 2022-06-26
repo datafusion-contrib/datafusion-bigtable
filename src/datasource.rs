@@ -7,7 +7,7 @@ use async_trait::async_trait;
 
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use datafusion::datasource::datasource::TableProviderFilterPushDown;
-use datafusion::datasource::TableProvider;
+use datafusion::datasource::{TableProvider, TableType};
 use datafusion::error::{DataFusionError, Result};
 use datafusion::logical_plan::Expr;
 use datafusion::physical_plan::ExecutionPlan;
@@ -129,6 +129,10 @@ impl TableProvider for BigtableDataSource {
         self.schema.clone()
     }
 
+    fn table_type(&self) -> TableType {
+        TableType::Base
+    }
+
     /// Create an ExecutionPlan that will scan the table.
     /// The table provider will be usually responsible of grouping
     /// the source data into partitions that can be efficiently
@@ -167,7 +171,7 @@ mod tests {
     use arrow::datatypes::{DataType, Field};
     use datafusion::assert_batches_eq;
     use datafusion::error::Result;
-    use datafusion::prelude::ExecutionContext;
+    use datafusion::prelude::SessionContext;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -188,7 +192,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut ctx = ExecutionContext::new();
+        let ctx = SessionContext::new();
         ctx.register_table("weather_balloons", Arc::new(bigtable_datasource))
             .unwrap();
         let mut batches = ctx.sql("SELECT \"_row_key\", pressure, \"_timestamp\" FROM weather_balloons where \"_row_key\" = 'us-west2#3698#2021-03-05-1200'").await?.collect().await?;
@@ -258,7 +262,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut ctx = ExecutionContext::new();
+        let ctx = SessionContext::new();
         ctx.register_table("weather_balloons", Arc::new(bigtable_datasource))
             .unwrap();
         let mut batches = ctx.sql("SELECT region, balloon_id, event_minute, pressure, \"_timestamp\" FROM weather_balloons where region = 'us-west2' and balloon_id='3698' and event_minute = '2021-03-05-1200'").await?.collect().await?;
